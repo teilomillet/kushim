@@ -1,0 +1,7 @@
+Disclaimer:
+
+The content of this dataset is protected to prevent unauthorized scraping and usage in machine learning models. The data is provided in an obfuscated format and requires a specific key for decryption.
+
+Please be advised that storing, sharing, or using this dataset in its raw, unobfuscated form without explicit permission is strictly prohibited. We have implemented these measures to protect the integrity of our data and to prevent its inclusion in training corpora for language models and other AI systems.
+
+By accessing this dataset, you agree to respect these terms and to handle the data responsibly. 
