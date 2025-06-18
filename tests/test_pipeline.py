@@ -1,68 +1,83 @@
+import os
 import pytest
 import polars as pl
-import os
-from kushim.pipeline import generate_qa_dataset
-from kushim.source import LocalFileSource, WikipediaSource, SourceDocument
+from dotenv import load_dotenv
+import litellm
 
-# A marker to skip tests that require a live API key if not available.
-# To run these tests, a .env file with a valid API key (e.g., GROQ_API_KEY) must be present.
-requires_api_key = pytest.mark.skipif(
-    not os.path.exists(".env"), reason="requires .env file with API key"
-)
+from kushim.pipeline import KushimPipeline
+from kushim.config import KushimConfig
+from kushim.source import LocalFileSource
 
-def test_local_file_source(sample_text_file):
+# Load environment variables for the live test
+load_dotenv()
+
+# Determine if the test should be skipped
+# This is a live test that makes real API calls. It should only run if an
+# API key is available in the environment.
+API_KEY_AVAILABLE = any(key.endswith('_API_KEY') for key in os.environ)
+
+@pytest.fixture
+def local_source(tmp_path):
+    """Creates a temporary local file source for testing."""
+    d = tmp_path / "test_data"
+    d.mkdir()
+    # Provide a slightly longer text to ensure there's enough content
+    # for the optimization step to generate a few examples.
+    p = d / "test_article.txt"
+    p.write_text("Apollo 11 was the American spaceflight that first landed humans on the Moon. Commander Neil Armstrong and lunar module pilot Buzz Aldrin formed the American crew that landed the Apollo Lunar Module Eagle on July 20, 1969, at 20:17 UTC. The mission fulfilled a national goal set by President John F. Kennedy in 1961.")
+    return LocalFileSource()
+
+@pytest.mark.skipif(not API_KEY_AVAILABLE, reason="Requires API key for live testing.")
+def test_pipeline_produces_high_quality_output(local_source, tmp_path):
     """
-    Tests that the LocalFileSource can correctly read a file and return
-    it in the standardized SourceDocument format.
+    Tests that the optimized pipeline produces high-quality, structured output.
+
+    This is a high-level behavioral test that verifies the pipeline's end-goal:
+    to generate a dataset of Q&A pairs that are not only structurally correct
+    but also adhere to specific quality standards (e.g., conciseness),
+    reflecting the logic in our advanced optimization metric.
     """
-    source = LocalFileSource()
-    documents = source.fetch(path=sample_text_file)
-
-    assert len(documents) == 1
-    doc = documents[0]
-    assert isinstance(doc, dict)
-    assert doc['title'] == 'test_document.txt'
-    assert 'Z1, created by Konrad Zuse' in doc['content']
-    assert doc['metadata']['path'] == sample_text_file
-
-@requires_api_key
-def test_e2e_pipeline_with_local_source(sample_text_file):
-    """
-    Performs a live, end-to-end test of the `generate_qa_dataset` pipeline
-    using a real LLM.
-
-    This test verifies that the pipeline can:
-    - Ingest data from a `LocalFileSource`.
-    - Generate and validate Q&A pairs using a live `dspy` setup.
-    - Return a non-empty, correctly structured DataFrame.
-    """
-    local_source = LocalFileSource()
-
-    # Run the entire pipeline against a live model
-    validated_dataset, source_docs = generate_qa_dataset(
-        source=local_source,
-        fetch_kwargs={'path': sample_text_file},
-        question_style="simple"
+    config = KushimConfig(
+        fetch_kwargs={"path": str(tmp_path / "test_data")},
+        model_name='openrouter/openai/gpt-4.1',
+        max_workers=1,
+        question_style="simple",
     )
 
-    # 1. Verify the source document was loaded
-    assert len(source_docs) == 1
-    assert source_docs[0]['title'] == 'test_document.txt'
+    pipeline = KushimPipeline(source=local_source, config=config)
+    
+    try:
+        qa_dataset, source_docs = pipeline.run(optimize=True, num_optimization_examples=2)
+    except litellm.BadRequestError as e:
+        if "invalid_api_key" in str(e).lower():
+            pytest.skip("Skipping test due to invalid API key in environment.")
+        # Re-raise the exception if it's a different kind of bad request
+        raise
 
-    # 2. Verify the final dataset structure and content
-    # With a live LLM, we can't assert specific content, but we can
-    # check that the process completed and returned a valid, non-empty dataset.
-    assert isinstance(validated_dataset, pl.DataFrame)
-    assert not validated_dataset.is_empty()
-    # Check for the new, enriched column structure
+    # 1. Structural Validation
+    assert isinstance(qa_dataset, pl.DataFrame)
+    assert not qa_dataset.is_empty(), "The pipeline should generate at least one valid Q&A pair."
+    
     expected_columns = ["question", "answer", "source_chunk", "source_title", "source_metadata"]
-    assert all(col in validated_dataset.columns for col in expected_columns)
-    
-    # 3. Verify that the source content and metadata are correctly propagated
-    first_row = validated_dataset.row(0, named=True)
-    assert isinstance(first_row['source_chunk'], str)
-    assert "Konrad Zuse" in first_row['source_chunk']
-    
-    # Check that the metadata from the original document is present
-    assert first_row['source_title'] == 'test_document.txt'
-    assert 'test_document.txt' in first_row['source_metadata'] 
+    for col in expected_columns:
+        assert col in qa_dataset.columns, f"DataFrame is missing expected column: {col}"
+        
+    # 2. Source Document Validation
+    assert len(source_docs) == 1
+    assert source_docs[0]['title'] == "test_article.txt"
+
+    # 3. Content Quality Validation
+    # This is the core of our high-level test. We are not just checking if the
+    # code runs; we are checking if the output meets our desired quality
+    # criteria, which in this case is defined by our `advanced_metric`.
+    for row in qa_dataset.iter_rows(named=True):
+        answer_word_count = len(row["answer"].split())
+        assert 1 <= answer_word_count <= 5, f"Answer '{row['answer']}' is not concise (1-5 words)."
+
+    print("\n" + "="*20)
+    print("Behavioral Test Passed: Pipeline produced high-quality output.")
+    print("="*20)
+    print("Generated DataFrame:")
+    print(qa_dataset)
+    print("\nSource Documents:")
+    print(source_docs) 

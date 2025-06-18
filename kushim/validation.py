@@ -19,6 +19,8 @@ class QAValidation(dspy.Signature):
 class QAValidationModule(dspy.Module):
     """
     A DSPy module for validating question-answer pairs against a source chunk.
+    This module can now return either a dspy.Prediction or a raw boolean,
+    making it flexible for use in different contexts, like optimization metrics.
     """
     def __init__(self):
         super().__init__()
@@ -26,9 +28,13 @@ class QAValidationModule(dspy.Module):
         # making the validation much more robust than a zero-shot approach.
         self.validate_qa = dspy.ChainOfThought(QAValidation)
 
-    def forward(self, question: str, answer: str, source_chunk: str) -> dspy.Prediction:
+    def forward(self, question: str, answer: str, source_chunk: str, return_bool: bool = False):
         """
         Validates a single question-answer pair.
+
+        Args:
+            return_bool: If True, returns a raw boolean instead of a dspy.Prediction.
+                         This is useful for direct evaluation in optimization loops.
         """
         # The module returns a dspy.Prediction object, which we can parse.
         result = self.validate_qa(
@@ -38,4 +44,8 @@ class QAValidationModule(dspy.Module):
         )
         # We need to access the `is_valid` attribute from the prediction.
         is_valid = result.is_valid
+        
+        if return_bool:
+            return is_valid
+        
         return dspy.Prediction(is_valid=is_valid)
