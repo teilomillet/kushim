@@ -54,9 +54,15 @@ def test_e2e_pipeline_with_local_source(sample_text_file):
     # check that the process completed and returned a valid, non-empty dataset.
     assert isinstance(validated_dataset, pl.DataFrame)
     assert not validated_dataset.is_empty()
-    assert validated_dataset.columns == ["question", "answer", "source"]
+    # Check for the new, enriched column structure
+    expected_columns = ["question", "answer", "source_chunk", "source_title", "source_metadata"]
+    assert all(col in validated_dataset.columns for col in expected_columns)
     
-    # 3. Verify that the source content is correctly propagated
-    first_source_chunk = validated_dataset[0, "source"]
-    assert isinstance(first_source_chunk, str)
-    assert "Konrad Zuse" in first_source_chunk 
+    # 3. Verify that the source content and metadata are correctly propagated
+    first_row = validated_dataset.row(0, named=True)
+    assert isinstance(first_row['source_chunk'], str)
+    assert "Konrad Zuse" in first_row['source_chunk']
+    
+    # Check that the metadata from the original document is present
+    assert first_row['source_title'] == 'test_document.txt'
+    assert 'test_document.txt' in first_row['source_metadata'] 

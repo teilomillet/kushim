@@ -2,7 +2,7 @@ import polars as pl
 import dspy
 import os
 from dotenv import load_dotenv
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dspy.teleprompt import BootstrapFewShot
@@ -78,36 +78,39 @@ def _get_default_compiled_module(module, trainset):
 
 # --- Reusable Pipeline Components ---
 
-# This function is the new, generic entry point for data fetching and chunking.
-# It replaces the previous, Wikipedia-specific functions. By accepting any object
-# that conforms to the `Source` protocol, it makes the pipeline source-agnostic.
+# The fetch_and_chunk function is updated to create a link between
+# each chunk and its original source document. This is the foundation
+# for the new metadata propagation feature.
 def fetch_and_chunk(
     source: Source,
     fetch_kwargs: Dict[str, Any],
     chunk_size: int = 512,
     chunk_overlap: int = 64,
-) -> tuple[List[str], List[SourceDocument]]:
+) -> Tuple[List[Tuple[str, SourceDocument]], List[SourceDocument]]:
     """
-    Fetches documents from a generic source, combines content, and chunks it.
+    Fetches documents, chunks them, and returns a list of (chunk, source_doc) tuples.
     """
     documents = source.fetch(**fetch_kwargs)
     if not documents:
-        print(f"No documents found for the given source and parameters.")
+        print("No documents found for the given source and parameters.")
         return [], []
 
-    full_content = "\\n\\n".join([doc['content'] for doc in documents])
     print(f"Fetched content from {len(documents)} documents.")
     
-    chunks = chunk_text(full_content, chunk_size=chunk_size, overlap=chunk_overlap)
-    print(f"Generated {len(chunks)} chunks.")
-    return chunks, documents
+    # Create a list of (chunk, source_doc) tuples to maintain provenance
+    chunk_bundles = []
+    for doc in documents:
+        chunks = chunk_text(doc['content'], chunk_size=chunk_size, overlap=chunk_overlap)
+        for chunk in chunks:
+            chunk_bundles.append((chunk, doc))
+            
+    print(f"Generated {len(chunk_bundles)} chunks across all documents.")
+    return chunk_bundles, documents
 
-
-# This function is now parallelized to speed up Q&A generation. By using a
-# `ThreadPoolExecutor`, we can make multiple concurrent API calls to the LLM,
-# dramatically reducing the time spent waiting on network I/O.
+# The generate_qa_pairs function is updated to handle the new `chunk_bundles`
+# and to enrich the output DataFrame with the source metadata.
 def generate_qa_pairs(
-    chunks: List[str],
+    chunk_bundles: List[Tuple[str, SourceDocument]],
     qa_generator: dspy.Module = None,
     trainset: List[dspy.Example] = None,
     model_name: str = 'groq/llama3-8b-8192',
@@ -117,61 +120,55 @@ def generate_qa_pairs(
     question_style: str = "narrative",
 ) -> pl.DataFrame:
     """
-    Generates question-answer pairs from text chunks in parallel.
+    Generates question-answer pairs and includes source document metadata.
     """
     _configure_dspy(model_name, llm)
     
     if qa_generator is None:
-        # --- Dynamic Q&A Module ---
-        # Look up the selected signature from the registry. This is the core
-        # of the new flexible generation system.
         signature = QUESTION_STYLE_REGISTRY.get(question_style)
         if not signature:
-            raise ValueError(f"Unknown question style: '{question_style}'. Available styles: {list(QUESTION_STYLE_REGISTRY.keys())}")
-        
-        qa_generator = QAGeneration(
-            signature=signature,
-            num_questions_per_chunk=num_questions_per_chunk
-        )
+            raise ValueError(f"Unknown question style: '{question_style}'.")
+        qa_generator = QAGeneration(signature=signature, num_questions_per_chunk=num_questions_per_chunk)
 
     if trainset:
-        optimizer = BootstrapFewShot(metric=lambda ex, pred, trace=None: True)  # Dummy metric
+        optimizer = BootstrapFewShot(metric=lambda ex, pred, trace=None: True)
         qa_generator = optimizer.compile(qa_generator, trainset=trainset)
 
     all_qa_pairs = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all chunk processing tasks to the thread pool
-        future_to_chunk = {executor.submit(qa_generator, context=chunk): chunk for chunk in chunks}
+        future_to_bundle = {
+            executor.submit(qa_generator, context=chunk): (chunk, source_doc)
+            for chunk, source_doc in chunk_bundles
+        }
         
-        for i, future in enumerate(as_completed(future_to_chunk)):
-            chunk = future_to_chunk[future]
+        for i, future in enumerate(as_completed(future_to_bundle)):
+            chunk, source_doc = future_to_bundle[future]
             try:
                 prediction = future.result()
-                print(f"Generated Q&A for chunk {i+1}/{len(chunks)}...")
-                # Handle single or multiple predictions
+                print(f"Generated Q&A for chunk {i+1}/{len(chunk_bundles)}...")
                 qa_list = prediction.qa_pairs if hasattr(prediction, 'qa_pairs') else [prediction]
                 for qa in qa_list:
+                    # Append the new metadata columns to the output
                     all_qa_pairs.append({
                         "question": qa.question,
                         "answer": qa.answer,
-                        "source": chunk,
+                        "source_chunk": chunk,
+                        "source_title": source_doc['title'],
+                        "source_metadata": str(source_doc['metadata'])
                     })
             except Exception as exc:
-                print(f"Chunk '{chunk[:50]}...' generated an exception: {exc}")
+                print(f"Chunk from '{source_doc['title']}' generated an exception: {exc}")
 
     return pl.DataFrame(all_qa_pairs)
 
-
-# This function is also parallelized. Validation, like generation, is an
-# I/O-bound task that benefits greatly from concurrent execution. The same
-# `ThreadPoolExecutor` pattern is applied here for a significant speed boost.
+# The validation function is updated to use the renamed `source_chunk` column.
 def validate_qa_pairs(
     raw_qa_pairs: pl.DataFrame,
     qa_validator: dspy.Module = None,
     trainset: List[dspy.Example] = None,
     model_name: str = 'groq/llama3-8b-8192',
     llm: dspy.LM = None,
-    max_workers: int = 4, # <-- New: Control concurrency
+    max_workers: int = 4,
 ) -> pl.DataFrame:
     """
     Validates a DataFrame of question-answer pairs in parallel.
@@ -187,13 +184,12 @@ def validate_qa_pairs(
 
     validated_pairs = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all validation tasks
         future_to_row = {
             executor.submit(
                 qa_validator,
                 question=row["question"],
                 answer=row["answer"],
-                source_chunk=row["source"]
+                source_chunk=row["source_chunk"] # <-- Use the renamed column
             ): row for row in raw_qa_pairs.iter_rows(named=True)
         }
 
@@ -203,7 +199,7 @@ def validate_qa_pairs(
                 result = future.result()
                 print(f"Validated Q&A pair {i+1}/{len(raw_qa_pairs)}...")
                 if result.is_valid:
-                    validated_pairs.append(row)
+                    validated_pairs.append(row) # Append the whole row with metadata
             except Exception as exc:
                 print(f"Validation for question '{row['question']}' generated an exception: {exc}")
 
@@ -244,13 +240,13 @@ def generate_qa_dataset(
         - A polars DataFrame with the validated Q&A pairs.
         - A list of the original source documents.
     """
-    chunks, source_documents = fetch_and_chunk(source, fetch_kwargs)
+    chunk_bundles, source_documents = fetch_and_chunk(source, fetch_kwargs)
 
-    if not chunks:
+    if not chunk_bundles:
         return pl.DataFrame(), []
 
     raw_qa_pairs = generate_qa_pairs(
-        chunks, 
+        chunk_bundles, 
         model_name=model_name, 
         llm=llm, 
         max_workers=max_workers,
