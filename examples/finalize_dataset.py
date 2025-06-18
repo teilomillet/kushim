@@ -20,7 +20,7 @@ def main():
     """
     Main function to orchestrate the dataset finalization workflow.
     """
-    # --- Configuration ---
+    # Configuration
     datasets_dir = "datasets"
     final_qa_filename = "final_shuffled_qa_dataset.csv"
     final_sources_filename = "final_sources.json"
@@ -30,7 +30,7 @@ def main():
     # A seed for the random shuffle to ensure reproducibility
     random_seed = 42
 
-    # === Step 1: Merge All Datasets ===
+    # Step 1: Merge All Datasets
     logging.info(f"--- Step 1: Merging all datasets from '{datasets_dir}' ---")
     
     # We call merge_datasets with `save_merged=False` to prevent it from
@@ -43,7 +43,7 @@ def main():
         
     logging.info(f"Merging complete. The full dataset has {len(merged_df)} rows and {len(merged_sources)} unique source articles.")
 
-    # === Step 2: Shuffle the Merged Dataset ===
+    # Step 2: Shuffle the Merged Dataset
     logging.info(f"--- Step 2: Shuffling the dataset with random seed {random_seed} ---")
     
     # Use the sample() method with a fraction of 1.0 to perform a full,
@@ -52,7 +52,7 @@ def main():
     
     logging.info("Dataset has been successfully shuffled.")
 
-    # === Step 3: Save the Final Dataset and Sources ===
+    # Step 3: Save the Final Dataset and Sources
     logging.info(f"--- Step 3: Saving final files ---")
     
     try:
@@ -70,7 +70,7 @@ def main():
         logging.error(f"Failed to save the final dataset files: {e}")
         return
 
-    # === Step 4: Display Final Dataset Summary ===
+    # Step 4: Display Final Dataset Summary
     print("\\n--- Final Shuffled Dataset Summary ---")
     rows, cols = shuffled_df.shape
     print(f"Dimensions: {rows} rows, {cols} columns")

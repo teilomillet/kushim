@@ -27,7 +27,7 @@ def main():
     
     logging.info("Merge process completed.")
 
-    # --- Display Dataset Summary ---
+    # Display Dataset Summary
     if merged_df is not None and not merged_df.is_empty():
         print("\\n--- Merged Dataset Summary ---")
         rows, cols = merged_df.shape

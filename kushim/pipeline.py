@@ -2,10 +2,11 @@ import polars as pl
 import dspy
 import os
 from dotenv import load_dotenv
-from typing import Callable, List, Optional
+from typing import List, Optional, Dict, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dspy.teleprompt import BootstrapFewShot
-from .source import WikipediaSource
+from .source import Source, SourceDocument
 from .chunking import chunk_text
 from .qagen import QAGeneration
 from .validation import QAValidationModule
@@ -77,58 +78,34 @@ def _get_default_compiled_module(module, trainset):
 
 # --- Reusable Pipeline Components ---
 
-def fetch_and_chunk_from_article(
-    article_title: str,
+# This function is the new, generic entry point for data fetching and chunking.
+# It replaces the previous, Wikipedia-specific functions. By accepting any object
+# that conforms to the `Source` protocol, it makes the pipeline source-agnostic.
+def fetch_and_chunk(
+    source: Source,
+    fetch_kwargs: Dict[str, Any],
     chunk_size: int = 512,
     chunk_overlap: int = 64,
-    source_fetcher: Optional[callable] = None,
-) -> tuple[List[str], List[dict]]:
+) -> tuple[List[str], List[SourceDocument]]:
     """
-    Fetches a single article, chunks it, and returns the chunks and source.
+    Fetches documents from a generic source, combines content, and chunks it.
     """
-    source_fetcher = source_fetcher or WikipediaSource().fetch_article_content
-    content = source_fetcher(article_title)
-    if not content:
-        print(f"Could not fetch content for '{article_title}'.")
+    documents = source.fetch(**fetch_kwargs)
+    if not documents:
+        print(f"No documents found for the given source and parameters.")
         return [], []
 
-    chunks = chunk_text(content, chunk_size=chunk_size, overlap=chunk_overlap)
-    print(f"Generated {len(chunks)} chunks from article '{article_title}'.")
-    
-    # We package the source content in a list of dicts to be consistent with the query-based function.
-    source_data = [{'title': article_title, 'content': content}]
-    return chunks, source_data
-
-def fetch_and_chunk_from_query(
-    query: str,
-    chunk_size: int = 512,
-    chunk_overlap: int = 64,
-    source_fetcher: Optional[callable] = None,
-    num_articles: int = 3,
-) -> tuple[List[str], List[dict]]:
-    """
-    Searches for articles, combines content, chunks it, and returns chunks and sources.
-    
-    This is a powerful way to build a dataset from a broader topic, rather than a single page.
-    It aggregates knowledge from multiple, relevant sources before generation.
-    """
-    source = WikipediaSource()
-    # Use the more powerful search method to find relevant articles
-    articles = source.search_and_filter_articles(query, num_articles_to_return=num_articles)
-    
-    if not articles:
-        print(f"No articles found for query '{query}'.")
-        return [], []
-
-    # Combine the content of all found articles into a single corpus
-    full_content = "\\n\\n".join([article['content'] for article in articles])
-    
-    print(f"Fetched content from {len(articles)} articles.")
+    full_content = "\\n\\n".join([doc['content'] for doc in documents])
+    print(f"Fetched content from {len(documents)} documents.")
     
     chunks = chunk_text(full_content, chunk_size=chunk_size, overlap=chunk_overlap)
-    print(f"Generated {len(chunks)} chunks from query '{query}'.")
-    return chunks, articles
+    print(f"Generated {len(chunks)} chunks.")
+    return chunks, documents
 
+
+# This function is now parallelized to speed up Q&A generation. By using a
+# `ThreadPoolExecutor`, we can make multiple concurrent API calls to the LLM,
+# dramatically reducing the time spent waiting on network I/O.
 def generate_qa_pairs(
     chunks: List[str],
     qa_generator: dspy.Module = None,
@@ -136,9 +113,10 @@ def generate_qa_pairs(
     model_name: str = 'groq/llama3-8b-8192',
     llm: dspy.LM = None,
     num_questions_per_chunk: int = 1,
+    max_workers: int = 4, 
 ) -> pl.DataFrame:
     """
-    Generates question-answer pairs from a list of text chunks.
+    Generates question-answer pairs from text chunks in parallel.
     """
     _configure_dspy(model_name, llm)
     
@@ -150,29 +128,42 @@ def generate_qa_pairs(
         qa_generator = optimizer.compile(qa_generator, trainset=trainset)
 
     all_qa_pairs = []
-    for i, chunk in enumerate(chunks):
-        print(f"Generating Q&A for chunk {i+1}/{len(chunks)}...")
-        prediction = qa_generator(context=chunk)
-        # Handle single or multiple predictions
-        qa_list = prediction.qa_pairs if hasattr(prediction, 'qa_pairs') else [prediction]
-        for qa in qa_list:
-            all_qa_pairs.append({
-                "question": qa.question,
-                "answer": qa.answer,
-                "source": chunk,
-            })
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all chunk processing tasks to the thread pool
+        future_to_chunk = {executor.submit(qa_generator, context=chunk): chunk for chunk in chunks}
+        
+        for i, future in enumerate(as_completed(future_to_chunk)):
+            chunk = future_to_chunk[future]
+            try:
+                prediction = future.result()
+                print(f"Generated Q&A for chunk {i+1}/{len(chunks)}...")
+                # Handle single or multiple predictions
+                qa_list = prediction.qa_pairs if hasattr(prediction, 'qa_pairs') else [prediction]
+                for qa in qa_list:
+                    all_qa_pairs.append({
+                        "question": qa.question,
+                        "answer": qa.answer,
+                        "source": chunk,
+                    })
+            except Exception as exc:
+                print(f"Chunk '{chunk[:50]}...' generated an exception: {exc}")
 
     return pl.DataFrame(all_qa_pairs)
 
+
+# This function is also parallelized. Validation, like generation, is an
+# I/O-bound task that benefits greatly from concurrent execution. The same
+# `ThreadPoolExecutor` pattern is applied here for a significant speed boost.
 def validate_qa_pairs(
     raw_qa_pairs: pl.DataFrame,
     qa_validator: dspy.Module = None,
     trainset: List[dspy.Example] = None,
     model_name: str = 'groq/llama3-8b-8192',
-    llm: dspy.LM = None
+    llm: dspy.LM = None,
+    max_workers: int = 4, # <-- New: Control concurrency
 ) -> pl.DataFrame:
     """
-    Validates a DataFrame of question-answer pairs.
+    Validates a DataFrame of question-answer pairs in parallel.
     """
     _configure_dspy(model_name, llm)
     
@@ -184,63 +175,71 @@ def validate_qa_pairs(
         qa_validator = optimizer.compile(qa_validator, trainset=trainset)
 
     validated_pairs = []
-    for i, row in enumerate(raw_qa_pairs.iter_rows(named=True)):
-        print(f"Validating Q&A pair {i+1}/{len(raw_qa_pairs)}...")
-        result = qa_validator(
-            question=row["question"],
-            answer=row["answer"],
-            source_chunk=row["source"]
-        )
-        if result.is_valid:
-            validated_pairs.append(row)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all validation tasks
+        future_to_row = {
+            executor.submit(
+                qa_validator,
+                question=row["question"],
+                answer=row["answer"],
+                source_chunk=row["source"]
+            ): row for row in raw_qa_pairs.iter_rows(named=True)
+        }
+
+        for i, future in enumerate(as_completed(future_to_row)):
+            row = future_to_row[future]
+            try:
+                result = future.result()
+                print(f"Validated Q&A pair {i+1}/{len(raw_qa_pairs)}...")
+                if result.is_valid:
+                    validated_pairs.append(row)
+            except Exception as exc:
+                print(f"Validation for question '{row['question']}' generated an exception: {exc}")
 
     if not validated_pairs:
         return pl.DataFrame()
         
     return pl.DataFrame(validated_pairs)
 
-# Generate a Q&A dataset from a Wikipedia article.
+# This is the main, user-facing function. Its signature is now generic,
+# accepting a `source` object and `fetch_kwargs`. This is the culmination of
+# the refactoring, allowing users to run the same pipeline on data from
+# Wikipedia, local files, or any other source they implement.
 def generate_qa_dataset(
-    article_title: Optional[str] = None,
-    query: Optional[str] = None,
+    source: Source,
+    fetch_kwargs: Dict[str, Any],
     model_name: str = 'groq/llama3-8b-8192',
     llm: dspy.LM = None,
-    num_articles_from_query: int = 3,
-) -> tuple[pl.DataFrame, List[dict]]:
+    max_workers: int = 4,
+) -> tuple[pl.DataFrame, List[SourceDocument]]:
     """
-    Runs the default end-to-end pipeline to generate a validated Q&A dataset.
+    Runs the end-to-end pipeline to generate a validated Q&A dataset from any source.
 
     This function provides a simple, high-level interface that composes the
     underlying modular components. For more advanced customization, users can
     call the individual component functions directly.
 
-    You can provide either a single `article_title` or a `query` to search for multiple articles.
+    Args:
+        source: An object that conforms to the Source protocol (e.g., WikipediaSource).
+        fetch_kwargs: A dictionary of arguments to pass to the source's fetch method.
+        model_name: The language model to use for generation and validation.
+        llm: An optional, pre-configured dspy.LM instance.
+        max_workers: The number of parallel threads to use for generation/validation.
 
     Returns:
         A tuple containing:
         - A polars DataFrame with the validated Q&A pairs.
-        - A list of dictionaries with the source article data.
+        - A list of the original source documents.
     """
-
-    if not article_title and not query:
-        raise ValueError("You must provide either an article_title or a query.")
-    if article_title and query:
-        raise ValueError("You can only provide an article_title or a query, not both.")
-
-    chunks = []
-    source_articles = []
-    if article_title:
-        chunks, source_articles = fetch_and_chunk_from_article(article_title)
-    elif query:
-        chunks, source_articles = fetch_and_chunk_from_query(query, num_articles=num_articles_from_query)
+    chunks, source_documents = fetch_and_chunk(source, fetch_kwargs)
 
     if not chunks:
         return pl.DataFrame(), []
 
-    raw_qa_pairs = generate_qa_pairs(chunks, model_name=model_name, llm=llm)
+    raw_qa_pairs = generate_qa_pairs(chunks, model_name=model_name, llm=llm, max_workers=max_workers)
     if raw_qa_pairs.is_empty():
         return pl.DataFrame(), []
 
-    validated_dataset = validate_qa_pairs(raw_qa_pairs, model_name=model_name, llm=llm)
+    validated_dataset = validate_qa_pairs(raw_qa_pairs, model_name=model_name, llm=llm, max_workers=max_workers)
     
-    return validated_dataset, source_articles
+    return validated_dataset, source_documents

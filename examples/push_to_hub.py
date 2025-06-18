@@ -18,7 +18,7 @@ def main():
     """
     Main function to run the dataset push process.
     """
-    # --- Configuration ---
+    # Configuration
     # IMPORTANT: Replace with your Hugging Face username and a desired dataset name.
     # For example: "my-username/kushim-generated-qa"
     repo_id = "YOUR_USERNAME/YOUR_DATASET_NAME"
@@ -30,7 +30,7 @@ def main():
     csv_to_upload = os.path.join(datasets_dir, "merged_qa_dataset.csv")
     sources_to_upload = os.path.join(datasets_dir, "merged_sources.json")
 
-    # --- Pre-flight Check ---
+    # Pre-flight Check
     if "YOUR_USERNAME" in repo_id:
         logging.error("Please update the 'repo_id' in this script with your Hugging Face username and a dataset name.")
         return
@@ -40,7 +40,7 @@ def main():
         logging.error("Please run the 'examples/merge_datasets.py' script first to generate it.")
         return
 
-    # --- Push to Hub ---
+    # Push to Hub
     logging.info(f"Attempting to push dataset to Hugging Face Hub repository: {repo_id}")
     
     push_dataset_to_hub(

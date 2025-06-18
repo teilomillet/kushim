@@ -32,7 +32,7 @@ def main():
         logging.error(f"Failed to load dataset. Ensure you are logged in (`huggingface-cli login`) and the repository exists. Error: {e}")
         return
 
-    # === Step 2: Extract and Decrypt the 'eval' Split ===
+    # Step 2: Extract and Decrypt the 'eval' Split
     if 'eval' not in dataset_dict:
         logging.error("The 'eval' split was not found in the loaded dataset.")
         return

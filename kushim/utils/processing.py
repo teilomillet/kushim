@@ -191,7 +191,7 @@ def _process_file_sync(
 
     effective_state_file = str(state_file) if state_file else f"{effective_output_path}.state.json"
     
-    # --- Column Management ---
+    # Column Management
     if columns_to_process is None:
         log.info("No columns specified; processing all columns except the password column.")
         try:
@@ -205,7 +205,7 @@ def _process_file_sync(
             log.error(f"Could not auto-detect columns from {str_input_path}. Please specify them manually. Error: {e}")
             raise
 
-    # --- Strategy Selection ---
+    # Strategy Selection
     input_size = _get_input_size(str_input_path)
     size_threshold_bytes = size_threshold_gb * (1024**3)
 
@@ -216,7 +216,7 @@ def _process_file_sync(
         log.info("File size is large or could not be determined. Using robust chunked processing.")
         _process_chunked(str_input_path, effective_output_path, password_column, effective_state_file, chunksize, func_to_apply, columns_to_process, canary_string_to_add, drop_password_column)
     
-    # --- Final Actions ---
+    # Final Actions
     if show_sample and show_sample > 0:
         _show_sample_data(effective_output_path, show_sample)
 
@@ -354,7 +354,7 @@ def _process_chunked(
                 
                 _save_state(state_file, current_offset)
         
-        # --- Consolidation Phase ---
+        # Consolidation Phase
         log.info("All chunks processed. Consolidating into final output file...")
         processed_files = sorted(
             [os.path.join(temp_dir, f) for f in os.listdir(temp_dir)],
@@ -372,7 +372,7 @@ def _process_chunked(
 
             final_df_lazy.sink_csv(output_path)
 
-        # --- Cleanup ---
+        # Cleanup
         shutil.rmtree(temp_dir)
         if os.path.exists(state_file):
             os.remove(state_file)

@@ -28,8 +28,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 def main():
     """Main function to orchestrate the dataset preparation and upload workflow."""
     
-    # --- Configuration ---
-    repo_id = "teilomillet/wikiqa"
+    # Configuration
+    repo_id = "teilomillet/wikipeqa"
     datasets_dir = "datasets"
     
     # Input files created by `finalize_dataset.py`
@@ -39,7 +39,7 @@ def main():
     # The size of the public, unencrypted sample.
     sample_size = 200
     
-    # --- Pre-flight Check ---
+    # Pre-flight Check
     if "YOUR_USERNAME" in repo_id:
         logging.error("Please update the 'repo_id' in this script with your Hugging Face username and a dataset name.")
         return
@@ -47,18 +47,18 @@ def main():
         logging.error(f"Final dataset files not found. Please run 'finalize_dataset.py' first.")
         return
 
-    # === Step 1: Load Final Datasets ===
+    # Step 1: Load Final Datasets
     logging.info(f"--- Step 1: Loading final dataset from '{final_qa_path}' ---")
     full_df = pl.read_csv(final_qa_path)
     with open(final_sources_path, 'r', encoding='utf-8') as f:
         sources_data = json.load(f)
     logging.info(f"Loaded {len(full_df)} Q&A pairs and {len(sources_data)} source articles.")
 
-    # === Step 2: Create Sample and Eval Splits ===
+    # Step 2: Create Sample and Eval Splits
     logging.info(f"--- Step 2: Splitting data into sample ({sample_size} rows) and eval splits ---")
     sample_df, eval_df = sample_and_split_dataset(full_df, sample_size=sample_size, seed=42)
 
-    # === Step 3: Encrypt the Eval Split ===
+    # Step 3: Encrypt the Eval Split
     logging.info(f"--- Step 3: Encrypting the 'eval' split in-memory ---")
     # Derive a meaningful canary name from the repository ID.
     canary_name = repo_id.split('/')[-1]
@@ -76,7 +76,7 @@ def main():
         pl.lit("").alias("canary")
     )
 
-    # === Step 4: Package into a DatasetDict ===
+    # Step 4: Package into a DatasetDict
     logging.info("--- Step 4: Creating Hugging Face DatasetDict ---")
     
     # The main dataset contains the Q&A pairs, split into a public sample
@@ -90,7 +90,7 @@ def main():
     logging.info("DatasetDict created with two splits: 'sample' and 'eval'.")
     print(dataset_dict)
 
-    # === Step 5: Push to Hugging Face Hub ===
+    # Step 5: Push to Hugging Face Hub
     logging.info("--- Step 5: Pushing DatasetDict and sources to the Hub ---")
     
     # This step requires you to be logged in via `huggingface-cli login`

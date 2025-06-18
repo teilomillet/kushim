@@ -29,4 +29,15 @@ def sample_plaintext_csv(tmp_path, sample_plaintext_df):
     """Creates a sample plaintext CSV file and returns its path."""
     file_path = os.path.join(tmp_path, "plaintext.csv")
     sample_plaintext_df.write_csv(file_path)
+    return file_path
+
+# --- Fixtures for Pipeline Testing ---
+
+@pytest.fixture
+def sample_text_file(tmp_path):
+    """Creates a sample text file for testing LocalFileSource."""
+    content = "The first modern computer was the Z1, created by Konrad Zuse in 1936. The first commercial computer was the UNIVAC I, introduced in 1951."
+    file_path = os.path.join(tmp_path, "test_document.txt")
+    with open(file_path, 'w') as f:
+        f.write(content)
     return file_path 

@@ -1,28 +1,86 @@
 import wikipedia
 import datetime
-from typing import List, Dict, Any, Optional
+import os
+from typing import List, Dict, Any, Optional, Protocol, Literal, TypedDict
+
+# Protocol Definition for Extensible Sources
+# This new section introduces a protocol-based architecture for data sourcing.
+# By defining a standard `Source` interface, we decouple the pipeline from any
+# specific data provider (like Wikipedia). Now, any class that adheres to the
+# `Source` protocol can be used, making the entire system extensible.
+
+class SourceDocument(TypedDict):
+    """A standardized dictionary to represent a single document from any source."""
+    title: str
+    content: str
+    metadata: Dict[str, Any]
+
+class Source(Protocol):
+    """
+    A protocol that defines the standard interface for all data sources.
+    Any class that implements a `fetch` method matching this signature
+    can be used by the Kushim pipeline.
+    """
+    def fetch(self, **kwargs) -> List[SourceDocument]:
+        """
+        Fetches documents from the source based on provided arguments.
+        
+        Returns:
+            A list of SourceDocument objects.
+        """
+        ...
+
+# Wikipedia Source Implementation
+# The `WikipediaSource` is refactored to be an implementation of the `Source`
+# protocol. Its public interface is now a single `fetch` method, which
+# provides a consistent entry point while still supporting all the previous
+# discovery modes (search, geosearch, etc.).
 
 class WikipediaSource:
     """
     A source extractor for fetching and curating content from Wikipedia.
-    
-    This class provides methods to not only fetch single articles but also
-    to search for articles on a topic, filter them by length, and return
-    a curated list of the most substantial pages, making it a powerful
-    tool for sourcing high-quality dataset material.
+    It implements the Source protocol, making it pluggable into the pipeline.
     """
     def __init__(self, user_agent: str = None):
         """
         Initializes the WikipediaSource.
-        
-        Sets a user-agent for API requests and enables rate limiting to ensure
-        robust and respectful communication with Wikipedia's servers.
         """
         user_agent = user_agent or "Kushim/0.3.0 (https://github.com/teilomillet/kushim; teilomillet@gmail.com) Research-tutorial"
         wikipedia.set_user_agent(user_agent)
-        
-        # Enable rate limiting to prevent HTTP timeout errors when making many requests.
         wikipedia.set_rate_limiting(True, min_wait=datetime.timedelta(milliseconds=50))
+
+    def fetch(
+        self,
+        mode: Literal['article', 'search', 'geosearch', 'random', 'linked'] = 'article',
+        **kwargs
+    ) -> List[SourceDocument]:
+        """
+        Main entry point for fetching articles from Wikipedia. Dispatches to the
+        appropriate internal method based on the 'mode'.
+        """
+        if mode == 'article':
+            return self._fetch_single_article(**kwargs)
+        elif mode == 'search':
+            return self._search_and_filter_articles(**kwargs)
+        elif mode == 'geosearch':
+            return self._geosearch_and_filter_articles(**kwargs)
+        elif mode == 'random':
+            return self._get_random_articles(**kwargs)
+        elif mode == 'linked':
+            return self._get_linked_articles(**kwargs)
+        else:
+            raise ValueError(f"Unknown Wikipedia fetch mode: {mode}")
+
+    def _to_source_documents(self, articles: List[Dict[str, Any]]) -> List[SourceDocument]:
+        """Converts the rich article dictionary from the wikipedia library into SourceDocument objects."""
+        return [
+            SourceDocument(
+                title=art['title'],
+                content=art['content'],
+                metadata={k: v for k, v in art.items() if k not in ['title', 'content']}
+            )
+            for art in articles
+        ]
 
     def _get_page(self, title: str) -> Optional[wikipedia.WikipediaPage]:
         """
@@ -44,58 +102,26 @@ class WikipediaSource:
             print(f"An unexpected error occurred while fetching '{title}': {e}. Skipping.")
             return None
 
-    def fetch_article_content(self, article_title: str) -> str:
-        """
-        Fetches the full plain text content of a single Wikipedia article.
-        """
+    def _fetch_single_article(self, article_title: str) -> List[SourceDocument]:
         page = self._get_page(article_title)
-        return page.content if page else ""
-
-    def search(self, query: str, max_results: int = 20) -> List[str]:
-        """
-        Performs a Wikipedia search and returns a list of article titles.
-        """
-        return wikipedia.search(query, results=max_results)
-
-    def _filter_and_sort_pages(
-        self,
-        pages: List[wikipedia.WikipediaPage],
-        num_articles_to_return: int,
-        min_word_count: int,
-    ) -> List[Dict[str, Any]]:
-        """
-        Internal helper to filter a list of WikipediaPage objects by word count
-        and return the longest ones with their metadata.
-        """
-        articles_with_meta = []
-        for page in pages:
-            if page and page.content:
-                word_count = len(page.content.split())
-                if word_count >= min_word_count:
-                    articles_with_meta.append({
-                        "title": page.title,
-                        "content": page.content,
-                        "word_count": word_count,
-                        "summary": page.summary,
-                        "links": page.links,
-                    })
+        if not page:
+            return []
         
-        sorted_articles = sorted(
-            articles_with_meta, key=lambda x: x['word_count'], reverse=True
-        )
-        
-        print(f"Found {len(sorted_articles)} articles meeting the minimum word count of {min_word_count}.")
-        final_articles = sorted_articles[:num_articles_to_return]
-        print(f"Returning the top {len(final_articles)} articles.")
-        return final_articles
+        article_dict = {
+            "title": page.title,
+            "content": page.content,
+            "summary": page.summary,
+            "links": page.links,
+        }
+        return self._to_source_documents([article_dict])
 
-    def search_and_filter_articles(
+    def _search_and_filter_articles(
         self,
         query: str,
         search_results_to_consider: int = 20,
         num_articles_to_return: int = 5,
         min_word_count: int = 1000,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[SourceDocument]:
         """
         Searches for articles, filters them by word count, and returns the longest ones.
 
@@ -108,17 +134,18 @@ class WikipediaSource:
             The list is sorted by word count in descending order.
         """
         print(f"Searching for the top {num_articles_to_return} articles for query: '{query}'...")
-        article_titles = self.search(query, max_results=search_results_to_consider)
+        article_titles = wikipedia.search(query, results=search_results_to_consider)
         
         print(f"Found {len(article_titles)} potential articles. Fetching and filtering...")
         pages = [self._get_page(title) for title in article_titles if title]
-        return self._filter_and_sort_pages(
+        filtered_articles = self._filter_and_sort_pages(
             [p for p in pages if p],
             num_articles_to_return=num_articles_to_return,
             min_word_count=min_word_count,
         )
+        return self._to_source_documents(filtered_articles)
 
-    def geosearch_and_filter_articles(
+    def _geosearch_and_filter_articles(
         self,
         latitude: float,
         longitude: float,
@@ -126,7 +153,7 @@ class WikipediaSource:
         min_word_count: int = 1000,
         radius: int = 10000,
         search_results_to_consider: int = 20,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[SourceDocument]:
         """
         Finds articles via geosearch, filters by word count, and returns the longest.
         Ideal for creating location-based datasets.
@@ -141,17 +168,18 @@ class WikipediaSource:
         
         print(f"Found {len(article_titles)} potential articles. Fetching and filtering...")
         pages = [self._get_page(title) for title in article_titles if title]
-        return self._filter_and_sort_pages(
+        filtered_articles = self._filter_and_sort_pages(
             [p for p in pages if p],
             num_articles_to_return=num_articles_to_return,
             min_word_count=min_word_count,
         )
+        return self._to_source_documents(filtered_articles)
 
-    def get_random_articles(
+    def _get_random_articles(
         self,
         num_articles_to_return: int = 5,
         min_word_count: int = 1000,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[SourceDocument]:
         """
         Fetches random articles, filters them by word count, and returns the longest.
         Excellent for creating diverse, unbiased datasets for general knowledge.
@@ -177,18 +205,19 @@ class WikipediaSource:
 
         print(f"Found {len(article_titles)} potential articles. Fetching and filtering...")
         pages = [self._get_page(title) for title in article_titles if title]
-        return self._filter_and_sort_pages(
+        filtered_articles = self._filter_and_sort_pages(
             [p for p in pages if p],
             num_articles_to_return=num_articles_to_return,
             min_word_count=min_word_count,
         )
+        return self._to_source_documents(filtered_articles)
 
-    def get_linked_articles(
+    def _get_linked_articles(
         self,
         article_title: str,
         num_articles_to_return: int = 5,
         min_word_count: int = 1000,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[SourceDocument]:
         """
         Finds articles linked from a seed article, filters by word count, and returns the longest.
         Powerful for creating interconnected, domain-specific datasets.
@@ -202,8 +231,80 @@ class WikipediaSource:
         print(f"Found {len(linked_titles)} linked articles. Fetching and filtering...")
         
         pages = [self._get_page(title) for title in linked_titles if title]
-        return self._filter_and_sort_pages(
+        filtered_articles = self._filter_and_sort_pages(
             [p for p in pages if p],
             num_articles_to_return=num_articles_to_return,
             min_word_count=min_word_count,
+        )
+        return self._to_source_documents(filtered_articles)
+    
+    def _filter_and_sort_pages(
+        self,
+        pages: List[wikipedia.WikipediaPage],
+        num_articles_to_return: int,
+        min_word_count: int,
+    ) -> List[Dict[str, Any]]:
+        articles_with_meta = []
+        for page in pages:
+            if page and page.content:
+                word_count = len(page.content.split())
+                if word_count >= min_word_count:
+                    articles_with_meta.append({
+                        "title": page.title,
+                        "content": page.content,
+                        "word_count": word_count,
+                        "summary": page.summary,
+                        "links": page.links,
+                    })
+        
+        sorted_articles = sorted(
+            articles_with_meta, key=lambda x: x['word_count'], reverse=True
+        )
+        
+        print(f"Found {len(sorted_articles)} articles meeting the minimum word count of {min_word_count}.")
+        final_articles = sorted_articles[:num_articles_to_return]
+        print(f"Returning the top {len(final_articles)} articles.")
+        return final_articles
+
+# Local File Source Implementation
+# This new class is an example of the extensibility enabled by the `Source`
+# protocol. It allows the pipeline to read from local `.txt` files, a
+# feature that was impossible with the previous rigid design.
+
+class LocalFileSource:
+    """
+    A source extractor for fetching content from local text files.
+    It implements the Source protocol, allowing it to be used interchangeably
+    with other sources in the pipeline.
+    """
+    def fetch(self, path: str) -> List[SourceDocument]:
+        """
+        Fetches content from a single file or all .txt files in a directory.
+        
+        Args:
+            path: A path to a single file or a directory.
+        """
+        if not os.path.exists(path):
+            print(f"Error: Path '{path}' does not exist.")
+            return []
+
+        if os.path.isfile(path):
+            return [self._read_file(path)]
+        elif os.path.isdir(path):
+            print(f"Reading all .txt files from directory: {path}")
+            files = [os.path.join(path, f) for f in os.listdir(path) if f.endswith('.txt')]
+            return [self._read_file(f) for f in files]
+        else:
+            return []
+
+    def _read_file(self, file_path: str) -> SourceDocument:
+        """Reads a single text file and returns it as a SourceDocument."""
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        filename = os.path.basename(file_path)
+        return SourceDocument(
+            title=filename,
+            content=content,
+            metadata={'path': file_path}
         )
