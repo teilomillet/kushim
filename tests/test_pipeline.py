@@ -42,7 +42,7 @@ def test_e2e_pipeline_with_local_source(sample_text_file):
     validated_dataset, source_docs = generate_qa_dataset(
         source=local_source,
         fetch_kwargs={'path': sample_text_file},
-        # The model should be configured via the user's .env file
+        question_style="simple"
     )
 
     # 1. Verify the source document was loaded

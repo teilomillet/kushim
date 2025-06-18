@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dspy.teleprompt import BootstrapFewShot
 from .source import Source, SourceDocument
 from .chunking import chunk_text
-from .qagen import QAGeneration
+from .qagen import QAGeneration, QUESTION_STYLE_REGISTRY
 from .validation import QAValidationModule
 
 # NOTE: For this pipeline to run, DSPy must be configured with a language model.
@@ -113,7 +113,8 @@ def generate_qa_pairs(
     model_name: str = 'groq/llama3-8b-8192',
     llm: dspy.LM = None,
     num_questions_per_chunk: int = 1,
-    max_workers: int = 4, 
+    max_workers: int = 4,
+    question_style: str = "narrative",
 ) -> pl.DataFrame:
     """
     Generates question-answer pairs from text chunks in parallel.
@@ -121,7 +122,17 @@ def generate_qa_pairs(
     _configure_dspy(model_name, llm)
     
     if qa_generator is None:
-        qa_generator = QAGeneration(num_questions_per_chunk=num_questions_per_chunk)
+        # --- Dynamic Q&A Module ---
+        # Look up the selected signature from the registry. This is the core
+        # of the new flexible generation system.
+        signature = QUESTION_STYLE_REGISTRY.get(question_style)
+        if not signature:
+            raise ValueError(f"Unknown question style: '{question_style}'. Available styles: {list(QUESTION_STYLE_REGISTRY.keys())}")
+        
+        qa_generator = QAGeneration(
+            signature=signature,
+            num_questions_per_chunk=num_questions_per_chunk
+        )
 
     if trainset:
         optimizer = BootstrapFewShot(metric=lambda ex, pred, trace=None: True)  # Dummy metric
@@ -211,6 +222,7 @@ def generate_qa_dataset(
     model_name: str = 'groq/llama3-8b-8192',
     llm: dspy.LM = None,
     max_workers: int = 4,
+    question_style: str = "narrative",
 ) -> tuple[pl.DataFrame, List[SourceDocument]]:
     """
     Runs the end-to-end pipeline to generate a validated Q&A dataset from any source.
@@ -225,6 +237,7 @@ def generate_qa_dataset(
         model_name: The language model to use for generation and validation.
         llm: An optional, pre-configured dspy.LM instance.
         max_workers: The number of parallel threads to use for generation/validation.
+        question_style: The type of questions to generate (e.g., 'narrative', 'simple').
 
     Returns:
         A tuple containing:
@@ -236,7 +249,13 @@ def generate_qa_dataset(
     if not chunks:
         return pl.DataFrame(), []
 
-    raw_qa_pairs = generate_qa_pairs(chunks, model_name=model_name, llm=llm, max_workers=max_workers)
+    raw_qa_pairs = generate_qa_pairs(
+        chunks, 
+        model_name=model_name, 
+        llm=llm, 
+        max_workers=max_workers,
+        question_style=question_style
+    )
     if raw_qa_pairs.is_empty():
         return pl.DataFrame(), []
 
