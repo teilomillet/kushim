@@ -1,6 +1,6 @@
 import polars as pl
 import dspy
-from typing import List, Tuple
+from typing import List, Tuple, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import litellm
 
@@ -89,7 +89,7 @@ class KushimPipeline:
         print(f"Generated {len(chunk_bundles)} chunks from {len(documents)} documents.")
         return chunk_bundles, documents
 
-    def _generate_qa_pairs_stream(self, chunk_bundles: List[Tuple[str, SourceDocument]], qa_generator: dspy.Module):
+    def _generate_qa_pairs_stream(self, chunk_bundles: List[Tuple[str, SourceDocument]], qa_generator: dspy.Module) -> Iterator[dict]:
         """Generates Q&A pairs from chunks and yields them one by one."""
         with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
             future_to_bundle = {executor.submit(qa_generator, context=chunk): (chunk, doc) for chunk, doc in chunk_bundles}
@@ -115,7 +115,7 @@ class KushimPipeline:
                     # For other errors, log them and attempt to continue processing.
                     print(f"Q&A generation for chunk from '{doc['title']}' failed: {e}")
 
-    def _validate_qa_pairs_stream(self, qa_pair_stream) -> dict:
+    def _validate_qa_pairs_stream(self, qa_pair_stream: Iterator[dict]) -> Iterator[dict]:
         """Validates a stream of Q&A pairs in parallel, yielding the valid ones."""
 
         def validate_row(row: dict):
