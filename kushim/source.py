@@ -2,6 +2,7 @@ import wikipedia
 import datetime
 import os
 from typing import List, Dict, Any, Optional, Protocol, Literal, TypedDict
+from llama_index.core import SimpleDirectoryReader
 
 # Protocol Definition for Extensible Sources
 # This new section introduces a protocol-based architecture for data sourcing.
@@ -268,18 +269,20 @@ class WikipediaSource:
 
 # Local File Source Implementation
 # This new class is an example of the extensibility enabled by the `Source`
-# protocol. It allows the pipeline to read from local `.txt` files, a
-# feature that was impossible with the previous rigid design.
+# protocol. It allows the pipeline to read from local files, a
+# feature that was impossible with the previous rigid design. It leverages
+# llama-index to automatically handle various file types.
 
 class LocalFileSource:
     """
-    A source extractor for fetching content from local text files.
+    A source extractor for fetching content from local files using llama-index.
     It implements the Source protocol, allowing it to be used interchangeably
-    with other sources in the pipeline.
+    with other sources in the pipeline. It supports various file types like
+    .md, .pdf, .docx, .json, etc., automatically selecting the appropriate loader.
     """
     def fetch(self, path: str) -> List[SourceDocument]:
         """
-        Fetches content from a single file or all .txt files in a directory.
+        Fetches content from a single file or all supported files in a directory.
         
         Args:
             path: A path to a single file or a directory.
@@ -289,22 +292,24 @@ class LocalFileSource:
             return []
 
         if os.path.isfile(path):
-            return [self._read_file(path)]
+            # For a single file, we pass it as a list to the reader
+            documents = SimpleDirectoryReader(input_files=[path]).load_data()
         elif os.path.isdir(path):
-            print(f"Reading all .txt files from directory: {path}")
-            files = [os.path.join(path, f) for f in os.listdir(path) if f.endswith('.txt')]
-            return [self._read_file(f) for f in files]
+            # For a directory, it reads all supported files
+            documents = SimpleDirectoryReader(input_dir=path).load_data()
         else:
             return []
-
-    def _read_file(self, file_path: str) -> SourceDocument:
-        """Reads a single text file and returns it as a SourceDocument."""
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
         
-        filename = os.path.basename(file_path)
-        return SourceDocument(
-            title=filename,
-            content=content,
-            metadata={'path': file_path}
-        )
+        # Convert llama-index documents to SourceDocument format
+        source_documents = []
+        for doc in documents:
+            title = doc.metadata.get("file_name", os.path.basename(doc.metadata.get("file_path", "unknown")))
+            source_documents.append(
+                SourceDocument(
+                    title=title,
+                    content=doc.text,
+                    metadata=doc.metadata
+                )
+            )
+        
+        return source_documents
