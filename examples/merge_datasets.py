@@ -29,7 +29,7 @@ def main():
 
     # Display Dataset Summary
     if merged_df is not None and not merged_df.is_empty():
-        print("\\n--- Merged Dataset Summary ---")
+        print("Merged Dataset Summary")
         rows, cols = merged_df.shape
         print(f"Dimensions: {rows} rows, {cols} columns")
         print(f"Column Names: {merged_df.columns}")

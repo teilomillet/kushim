@@ -26,7 +26,7 @@ async def test_in_memory_encryption_decryption_e2e(sample_plaintext_csv, sample_
         canary_name="test_dataset"
     )
     
-    # --- Verification for Encryption ---
+    # Verification for Encryption
     assert os.path.exists(encrypted_path)
     encrypted_df = pl.read_csv(encrypted_path)
     
@@ -52,7 +52,7 @@ async def test_in_memory_encryption_decryption_e2e(sample_plaintext_csv, sample_
         drop_password_column=True
     )
     
-    # --- Verification for Decryption ---
+    # Verification for Decryption
     assert os.path.exists(decrypted_path)
     # The decryption process outputs strings. To prevent Polars from
     # re-inferring numeric types from columns that look like numbers (e.g., 'secret_id'),
@@ -102,7 +102,7 @@ async def test_chunked_encryption_decryption_e2e(sample_plaintext_csv, sample_pl
         drop_password_column=True
     )
     
-    # --- Verification ---
+    # Verification
     # We use `infer_schema_length=0` to ensure that columns containing numbers
     # are read as strings, matching the state of the data after decryption.
     decrypted_df = pl.read_csv(decrypted_path, infer_schema_length=0)
@@ -137,7 +137,7 @@ async def test_smart_defaults_for_all_columns(sample_plaintext_csv, sample_plain
         drop_password_column=True
     )
 
-    # --- Verification ---
+    # Verification
     # We use `infer_schema_length=0` to ensure that columns containing numbers
     # are read as strings, matching the state of the data after decryption.
     decrypted_df = pl.read_csv(decrypted_path, infer_schema_length=0)
@@ -171,7 +171,7 @@ async def test_decryption_keeps_password_column_by_default(sample_plaintext_csv,
         password_column="canary",
     )
 
-    # --- Verification ---
+    # Verification
     decrypted_df = pl.read_csv(decrypted_path)
     # Check that the 'canary' column is present in the output
     assert "canary" in decrypted_df.columns

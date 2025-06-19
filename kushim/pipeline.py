@@ -1,8 +1,9 @@
 import polars as pl
 import dspy
-from typing import List, Tuple, Iterator
+from typing import List, Tuple, Iterator, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import litellm
+import os
 
 # We are importing the BootstrapFewShotWithRandomSearch, which is a more
 # advanced teleprompter. It will programmatically generate and evaluate
@@ -179,49 +180,72 @@ class KushimPipeline:
             raise ValueError(f"Unknown question style: '{self.config.question_style}'.")
         return QAGeneration(signature=signature, num_questions_per_chunk=self.config.num_questions_per_chunk)
 
-    def run(self, optimize: bool = True, num_optimization_examples: int = 10) -> Tuple[pl.DataFrame, List[SourceDocument]]:
+    def run(
+        self, 
+        optimize: bool = True, 
+        num_optimization_examples: int = 10,
+        compiled_generator_path: Optional[str] = None
+    ) -> Tuple[pl.DataFrame, List[SourceDocument]]:
         """
         Executes the end-to-end pipeline with an optional optimization step.
 
+        This method now supports saving and loading a compiled (optimized)
+        generator to avoid re-running the expensive optimization process.
+
         Args:
-            optimize: If True, runs the self-improvement loop to find a better
-                      few-shot prompt before full generation.
-            num_optimization_examples: The number of data chunks to use for building
-                                     the optimization training set.
+            optimize: If True, runs the self-improvement loop. This is ignored
+                      if a valid `compiled_generator_path` is found.
+            num_optimization_examples: The number of data chunks for optimization.
+            compiled_generator_path: Path to save/load the compiled generator.
+                                     If the file exists, it's loaded, and
+                                     optimization is skipped. If it doesn't
+                                     exist and `optimize` is True, the new
+                                     compiled generator is saved to this path.
 
         Returns:
-            A tuple containing the validated Q&A DataFrame and the list of source documents.
+            A tuple containing the validated Q&A DataFrame and source documents.
         """
         chunk_bundles, source_documents = self._fetch_and_chunk()
         if not chunk_bundles:
             return pl.DataFrame(), []
 
-        if optimize:
-            # 1. Create a training set programmatically from the source data
+        # Get the base generator module. It will be optimized or loaded into.
+        generator = self._get_base_generator()
+
+        # If a path is provided and a compiled file exists, load it.
+        if compiled_generator_path and os.path.exists(compiled_generator_path):
+            print(f"Loading compiled generator from {compiled_generator_path}...")
+            generator.load(compiled_generator_path)
+            print("Load complete. Skipping optimization.")
+        # Otherwise, if optimization is enabled, run the optimizer.
+        elif optimize:
+            # 1. Create a training set programmatically.
             trainset = self._create_training_set_from_data(chunk_bundles, num_examples=num_optimization_examples)
             
             if not trainset:
-                print("Warning: Could not create a training set. Falling back to the base generator. This may happen if the generation model is failing or producing invalid formats.")
-                optimized_generator = self._get_base_generator()
+                print("Warning: Could not create a training set. Falling back to the base generator.")
             else:
-                # 2. The pipeline now uses the more sophisticated, multi-faceted metric
-                #    to guide the optimization process.
+                # 2. Configure and run the DSPy optimizer.
                 optimizer = BootstrapFewShotWithRandomSearch(
                     metric=self.metric,
                     max_bootstrapped_demos=2,
                     num_candidate_programs=4,
                 )
-                base_generator = self._get_base_generator()
-                optimized_generator = optimizer.compile(base_generator, trainset=trainset)
+                optimized_generator = optimizer.compile(generator, trainset=trainset)
+                generator = optimized_generator # Use the optimized generator.
                 print("Optimization complete. Running full generation with the optimized module.")
-        else:
-            optimized_generator = self._get_base_generator()
 
-        # 4. Run the full generation and validation process using a streaming pipeline
-        qa_pair_stream = self._generate_qa_pairs_stream(chunk_bundles, optimized_generator)
+                # 3. If a path is provided, save the newly compiled generator.
+                if compiled_generator_path:
+                    print(f"Saving compiled generator to {compiled_generator_path}...")
+                    generator.save(compiled_generator_path)
+                    print("Save complete.")
+        
+        # 4. Run the full generation and validation process.
+        qa_pair_stream = self._generate_qa_pairs_stream(chunk_bundles, generator)
         validated_qa_stream = self._validate_qa_pairs_stream(qa_pair_stream)
         
-        # Collect the final results from the stream into a DataFrame
+        # Collect the final results.
         validated_dataset = pl.DataFrame(list(validated_qa_stream))
         
         return validated_dataset, source_documents

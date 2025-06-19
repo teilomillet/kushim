@@ -1,13 +1,17 @@
 """
 This script provides a complete example of how to use the Kushim framework
-to generate a high-quality, verifiable Q&A dataset from a Wikipedia article.
+to generate a high-quality, verifiable Q&A dataset from various sources.
 
-It demonstrates the simple, high-level pipeline function.
+It demonstrates the direct use of the core Kushim components, which is the
+recommended approach for users of the library.
 """
 import os
 import json
-import kushim
 import logging
+
+from kushim import pipeline
+from kushim import config
+from kushim import source
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -16,35 +20,64 @@ def main():
     """
     Main function to orchestrate the Q&A generation pipeline.
     """
-    # model_to_use = "openai/gpt-4.1" # Example for OpenAI
-    model_to_use = "openrouter/openai/gpt-4.1" # Default, fast and free model
+    # Define the model to use for generation and validation.
+    # Make sure you have the necessary API keys set up in your environment
+    # (e.g., OPENAI_API_KEY for OpenAI models).
+    model_to_use = "openrouter/openai/gpt-4.1"
+    
+    # Initialize the data source. You can choose from different sources.
+    # In this example, we use WikipediaSource to find articles by a search query.
+    data_source = source.WikipediaSource()
+    fetch_kwargs = {
+        "mode": "search",
+        "query": "Moon",
+        "num_articles_to_return": 5,
+    }
+    output_filename_base = "moon"
 
-    # To generate questions from a single, specific Wikipedia article,
-    # simply provide the article title.
-    # article_title = "Supermarine Spitfire"
-    # logging.info("Starting Q&A dataset generation for article: '%s'", article_title)
-    # validated_qa_dataset, source_articles = kushim.pipeline.generate_qa_dataset(
-    #     article_title=article_title, model_name=model_to_use
-    # )
-    # output_filename_base = article_title.replace(' ', '_')
-    
-    
-    # For a more powerful approach, you can provide a search query.
-    # Kushim will find the most relevant articles, combine their content,
-    # and generate questions from that broader knowledge base.
-    search_query = "Saturn"
-    logging.info("Starting Q&A dataset generation for query: '%s'", search_query)
-    validated_qa_dataset, source_articles = kushim.pipeline.generate_qa_dataset(
-        query=search_query, num_articles_from_query=8, model_name=model_to_use
+    # Alternative Sources (Examples)
+    # 1. Use a single Wikipedia article
+    # data_source = source.WikipediaSource()
+    # fetch_kwargs = {"mode": "article", "article_title": "Supermarine Spitfire"}
+    # output_filename_base = "supermarine_spitfire"
+
+    # 2. Use local text files from a directory
+    # os.makedirs("my_documents", exist_ok=True)
+    # with open("my_documents/doc1.txt", "w") as f:
+    #     f.write("The first manned mission to Mars is planned for the 2030s.")
+    # data_source = source.LocalFileSource()
+    # fetch_kwargs = {"path": "my_documents"}
+    # output_filename_base = "local_docs"
+
+    # Define a file path to save/load the compiled (optimized) generator.
+    # This avoids re-running the expensive optimization process on every execution.
+    compiled_program_path = f"compiled_{output_filename_base}_generator.json"
+
+    logging.info(f"Starting Q&A dataset generation for source with args: {fetch_kwargs}")
+
+    # Create the configuration for the pipeline.
+    # This includes the model name and the arguments for the data source.
+    pipeline_config = config.KushimConfig(
+        model_name=model_to_use,
+        fetch_kwargs=fetch_kwargs,
+        num_questions_per_chunk=2, # Generate 2 questions per chunk
+        max_workers=8 # Use 8 parallel workers for generation/validation
     )
-    output_filename_base = search_query.replace(' ', '_')
 
+    # Instantiate the main Kushim pipeline with the source and config.
+    kushim_pipeline = pipeline.KushimPipeline(
+        source=data_source,
+        config=pipeline_config
+    )
 
-    # For advanced use, you can call the individual components yourself:
-    #
-    # chunks = kushim.pipeline.fetch_and_chunk_from_query(search_query)
-    # raw_pairs = kushim.pipeline.generate_qa_pairs(chunks)
-    # validated_qa_dataset = kushim.pipeline.validate_qa_pairs(raw_pairs)
+    # Execute the pipeline.
+    # If a compiled generator exists at `compiled_program_path`, it will be
+    # loaded, and the optimization step will be skipped. Otherwise, the
+    # pipeline will run optimization and save the result to the path.
+    validated_qa_dataset, source_articles = kushim_pipeline.run(
+        optimize=True,
+        compiled_generator_path=compiled_program_path
+    )
 
     if validated_qa_dataset is not None and not validated_qa_dataset.is_empty():
         print(f"\\nSuccessfully generated {len(validated_qa_dataset)} validated Q&A pairs.")
@@ -70,8 +103,8 @@ def main():
         print(f"Source articles saved to: {sources_output_path}")
 
     else:
-        logging.warning("No validated Q&A pairs were generated for this query.")
-        print("\\nNo validated Q&A pairs were generated for this query.")
+        logging.warning("No validated Q&A pairs were generated.")
+        print("\\nNo validated Q&A pairs were generated.")
 
 if __name__ == "__main__":
     main() 

@@ -171,7 +171,7 @@ def _process_file_sync(
     Synchronous dispatcher that chooses the processing strategy
     based on file size.
     """
-    # --- Path Management ---
+    Path Management ---
     # Logic for determining output paths is now consolidated here to ensure
     # all paths are strings and handled consistently.
     str_input_path = str(input_path)

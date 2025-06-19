@@ -1,6 +1,6 @@
 [project]
 name = "kushim"
-version = "0.0.2"
+version = "0.0.3"
 description = "A framework for building high-quality, verifiable evaluation datasets for LLMs."
 readme = "README.md"
 requires-python = ">=3.9"

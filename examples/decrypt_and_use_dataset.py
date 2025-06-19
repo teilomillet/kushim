@@ -23,7 +23,7 @@ def main():
     
     repo_id = "teilomillet/wikiqa"
     
-    logging.info(f"--- Step 1: Loading dataset '{repo_id}' from the Hugging Face Hub ---")
+    logging.info(f"Step 1: Loading dataset '{repo_id}' from the Hugging Face Hub")
     try:
         dataset_dict = load_dataset(repo_id)
         logging.info("Dataset loaded successfully.")
@@ -37,7 +37,7 @@ def main():
         logging.error("The 'eval' split was not found in the loaded dataset.")
         return
         
-    logging.info("--- Step 2: Decrypting the 'eval' split ---")
+    logging.info("Step 2: Decrypting the 'eval' split")
     
     # Convert the Hugging Face Dataset to a Polars DataFrame for processing.
     eval_dataset = dataset_dict['eval']
@@ -50,7 +50,7 @@ def main():
         columns_to_decrypt=['question', 'answer', 'source']
     )
 
-    logging.info("--- Step 3: Verification ---")
+    logging.info("Step 3: Verification")
     logging.info("Decryption complete. Showing the first 5 rows of the decrypted 'eval' data:")
     print(decrypted_df.head())
 

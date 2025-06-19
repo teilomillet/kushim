@@ -31,7 +31,7 @@ def main():
     random_seed = 42
 
     # Step 1: Merge All Datasets
-    logging.info(f"--- Step 1: Merging all datasets from '{datasets_dir}' ---")
+    logging.info(f"Step 1: Merging all datasets from '{datasets_dir}'")
     
     # We call merge_datasets with `save_merged=False` to prevent it from
     # creating intermediate files. We only want the final, shuffled output.
@@ -44,7 +44,7 @@ def main():
     logging.info(f"Merging complete. The full dataset has {len(merged_df)} rows and {len(merged_sources)} unique source articles.")
 
     # Step 2: Shuffle the Merged Dataset
-    logging.info(f"--- Step 2: Shuffling the dataset with random seed {random_seed} ---")
+    logging.info(f"Step 2: Shuffling the dataset with random seed {random_seed}")
     
     # Use the sample() method with a fraction of 1.0 to perform a full,
     # efficient, in-memory shuffle of the DataFrame.
@@ -53,7 +53,7 @@ def main():
     logging.info("Dataset has been successfully shuffled.")
 
     # Step 3: Save the Final Dataset and Sources
-    logging.info(f"--- Step 3: Saving final files ---")
+    logging.info(f"Step 3: Saving final files")
     
     try:
         # Save the shuffled Q&A data
@@ -71,11 +71,11 @@ def main():
         return
 
     # Step 4: Display Final Dataset Summary
-    print("\\n--- Final Shuffled Dataset Summary ---")
+    print("Final Shuffled Dataset Summary")
     rows, cols = shuffled_df.shape
     print(f"Dimensions: {rows} rows, {cols} columns")
     print(f"Column Names: {shuffled_df.columns}")
-    print("\\nFirst 5 rows of the final, shuffled data:")
+    print("First 5 rows of the final, shuffled data:")
     print(shuffled_df.head())
     print(f"\\nFull shuffled Q&A dataset saved to: {final_qa_path}")
     print(f"Full sources file saved to: {final_sources_path}")

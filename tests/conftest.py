@@ -31,7 +31,7 @@ def sample_plaintext_csv(tmp_path, sample_plaintext_df):
     sample_plaintext_df.write_csv(file_path)
     return file_path
 
-# --- Fixtures for Pipeline Testing ---
+# Fixtures for Pipeline Testing
 
 @pytest.fixture
 def sample_text_file(tmp_path):

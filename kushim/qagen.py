@@ -40,7 +40,7 @@ class BooleanQA(dspy.Signature):
     answer = dspy.OutputField(desc="A 'Yes' or 'No' answer.")
 
 
-# --- Question Style Registry ---
+# Question Style Registry
 # This registry maps user-friendly style names to the corresponding dspy.Signature class.
 # It allows the pipeline to be dynamically configured to produce different types of Q&A pairs.
 QUESTION_STYLE_REGISTRY: Dict[str, Type[dspy.Signature]] = {

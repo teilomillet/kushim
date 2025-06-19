@@ -48,18 +48,18 @@ def main():
         return
 
     # Step 1: Load Final Datasets
-    logging.info(f"--- Step 1: Loading final dataset from '{final_qa_path}' ---")
+    logging.info(f"Step 1: Loading final dataset from '{final_qa_path}'")
     full_df = pl.read_csv(final_qa_path)
     with open(final_sources_path, 'r', encoding='utf-8') as f:
         sources_data = json.load(f)
     logging.info(f"Loaded {len(full_df)} Q&A pairs and {len(sources_data)} source articles.")
 
     # Step 2: Create Sample and Eval Splits
-    logging.info(f"--- Step 2: Splitting data into sample ({sample_size} rows) and eval splits ---")
+    logging.info(f"Step 2: Splitting data into sample ({sample_size} rows) and eval splits")
     sample_df, eval_df = sample_and_split_dataset(full_df, sample_size=sample_size, seed=42)
 
     # Step 3: Encrypt the Eval Split
-    logging.info(f"--- Step 3: Encrypting the 'eval' split in-memory ---")
+    logging.info(f"Step 3: Encrypting the 'eval' split in-memory")
     # Derive a meaningful canary name from the repository ID.
     canary_name = repo_id.split('/')[-1]
     encrypted_eval_df = encrypt_dataframe(
@@ -77,7 +77,7 @@ def main():
     )
 
     # Step 4: Package into a DatasetDict
-    logging.info("--- Step 4: Creating Hugging Face DatasetDict ---")
+    logging.info("Step 4: Creating Hugging Face DatasetDict")
     
     # The main dataset contains the Q&A pairs, split into a public sample
     # and an encrypted evaluation set. The 'sources' data will be uploaded
@@ -91,7 +91,7 @@ def main():
     print(dataset_dict)
 
     # Step 5: Push to Hugging Face Hub
-    logging.info("--- Step 5: Pushing DatasetDict and sources to the Hub ---")
+    logging.info("Step 5: Pushing DatasetDict and sources to the Hub")
     
     # This step requires you to be logged in via `huggingface-cli login`
     try:
