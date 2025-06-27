@@ -10,6 +10,10 @@ dependencies = [
     "wikipedia>=1.4.0",
     "python-dotenv>=1.0.0",
     "llama-index",
+    "llama-index-vector-stores-postgres",
+    "llama-index-embeddings-openai",
+    "psycopg2-binary",
+    "SQLAlchemy",
     "datasets>=3.6.0",
     "huggingface-hub[cli]>=0.33.0",
 ]

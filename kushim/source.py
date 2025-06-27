@@ -2,7 +2,9 @@ import wikipedia
 import datetime
 import os
 from typing import List, Dict, Any, Optional, Protocol, Literal, TypedDict
-from llama_index.core import SimpleDirectoryReader
+from llama_index.core import SimpleDirectoryReader, VectorStoreIndex
+from llama_index.core.vector_stores import MetadataFilter, MetadataFilters
+from llama_index.vector_stores.postgres import PGVectorStore
 
 # Protocol Definition for Extensible Sources
 # This new section introduces a protocol-based architecture for data sourcing.
@@ -31,6 +33,74 @@ class Source(Protocol):
         """
         ...
 
+# VectorDB Source Implementation
+# This new source allows fetching documents from a vector database. It uses
+# LlamaIndex to connect to a PGVectorStore and retrieves documents based on
+# metadata filtering. 
+
+class VectorDBSource:
+    """
+    A source for fetching data from a pre-existing vector database.
+    It implements the Source protocol, enabling it to be used in the pipeline
+    to retrieve documents based on a specific theme by using metadata filtering.
+    """
+    def __init__(self, vector_store: PGVectorStore):
+        """
+        Initializes the VectorDBSource with a vector store instance.
+        
+        The connection to the vector database is established here, and the
+        VectorStoreIndex is created to prepare for querying.
+        """
+        self._vector_store = vector_store
+        self._index = VectorStoreIndex.from_vector_store(vector_store)
+
+    def fetch(self, theme: str, top_k: int = 5) -> List[SourceDocument]:
+        """
+        Fetches documents from the vector database that match a specific theme.
+
+        This method leverages metadata filtering to find documents that have a
+        'theme' metadata field matching the provided value. This allows for
+        the creation of datasets focused on specific topics.
+
+        Args:
+            theme: The theme to filter the documents by. This assumes that the
+                   documents in the vector store have a 'theme' key in their
+                   metadata.
+            top_k: The maximum number of documents to retrieve.
+
+        Returns:
+            A list of SourceDocument objects matching the theme.
+        """
+        print(f"Fetching top {top_k} documents for theme: '{theme}' from vector database...")
+        
+        # We create a metadata filter to only retrieve documents with a specific theme.
+        filters = MetadataFilters(
+            filters=[MetadataFilter(key="theme", value=theme)]
+        )
+        
+        # The retriever is configured to use the metadata filters.
+        retriever = self._index.as_retriever(
+            similarity_top_k=top_k,
+            filters=filters,
+        )
+
+        # The query for the retriever can be generic when filtering by theme
+        # as we want to retrieve documents based on the theme metadata, not 
+        # necessarily semantic similarity to a query text. Here we use the 
+        # theme itself as the query string.
+        retrieved_nodes = retriever.retrieve(theme)
+
+        documents = []
+        for node in retrieved_nodes:
+            documents.append(
+                SourceDocument(
+                    title=node.metadata.get("title", "Untitled"),
+                    content=node.get_content(),
+                    metadata=node.metadata,
+                )
+            )
+        return documents
+
 # Wikipedia Source Implementation
 # The `WikipediaSource` is refactored to be an implementation of the `Source`
 # protocol. Its public interface is now a single `fetch` method, which
@@ -42,7 +112,7 @@ class WikipediaSource:
     A source extractor for fetching and curating content from Wikipedia.
     It implements the Source protocol, making it pluggable into the pipeline.
     """
-    def __init__(self, user_agent: str = None):
+    def __init__(self, user_agent: Optional[str] = None):
         """
         Initializes the WikipediaSource.
         """
