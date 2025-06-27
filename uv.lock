@@ -1104,7 +1104,7 @@ dependencies = [
     { name = "dspy" },
     { name = "huggingface-hub", extra = ["cli"] },
     { name = "llama-index" },
-    { name = "llama-index-embeddings-openai" },
+    { name = "llama-index-embeddings-jinaai" },
     { name = "llama-index-vector-stores-postgres" },
     { name = "polars" },
     { name = "psycopg2-binary" },
@@ -1127,7 +1127,7 @@ requires-dist = [
     { name = "dspy", specifier = ">=2.4.5" },
     { name = "huggingface-hub", extras = ["cli"], specifier = ">=0.33.0" },
     { name = "llama-index" },
-    { name = "llama-index-embeddings-openai" },
+    { name = "llama-index-embeddings-jinaai" },
     { name = "llama-index-vector-stores-postgres" },
     { name = "polars", specifier = ">=0.20.0" },
     { name = "psycopg2-binary" },
@@ -1289,6 +1289,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d8/67/ef1fc8c3b0676b524fd6b67a0e3e082996d768d227ed2b4b39f78119253b/llama_index_core-0.12.42.tar.gz", hash = "sha256:cff21fe15610826997c876a6b1d28d52727932c5f9c2af04b23e041a10f40a24", size = 7292833, upload-time = "2025-06-12T03:07:06.791Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1f/92/dc47b702da141d0f617ee86d26b5bdb62ed9a52518d1a5f271e91337e4a7/llama_index_core-0.12.42-py3-none-any.whl", hash = "sha256:0534cd9a4f6113175aa406a47ae9a683b5a43fd55532e9dbbffa96838ff18e07", size = 7665930, upload-time = "2025-06-12T03:06:58.387Z" },
+]
+
+[[package]]
+name = "llama-index-embeddings-jinaai"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "llama-index-core" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e0/c5/c2eaae16a24fedb0d5399d6a54f53bd7b3d20816bf8ab869d2f1a41dc58b/llama_index_embeddings_jinaai-0.4.0.tar.gz", hash = "sha256:cdf3d05fd4f6639c1ca2ac0793c6328768cf4ee704cdda980df14403b434220e", size = 3616, upload-time = "2024-11-17T23:36:45.367Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d2/55/e452ce17bca6584241b08f1ce9a57e2462e71a5fc5be905b12e442b96ef6/llama_index_embeddings_jinaai-0.4.0-py3-none-any.whl", hash = "sha256:2bad51ca51a6e5a12bee9c0ab9f8c3f0ac1e60132368bfe1f37f7c5ff7ccfc56", size = 3887, upload-time = "2024-11-17T23:36:43.825Z" },
 ]
 
 [[package]]

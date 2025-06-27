@@ -16,7 +16,7 @@ from kushim import pipeline, config, source
 from llama_index.core import Document, VectorStoreIndex, StorageContext
 from llama_index.vector_stores.postgres import PGVectorStore
 from llama_index.core import Settings
-from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.embeddings.jinaai import JinaEmbedding
 
 # Load environment variables from .env file
 load_dotenv()
@@ -34,12 +34,15 @@ TABLE_NAME = "kushim_e2e_documents"
 
 # Model for generation and validation
 MODEL_TO_USE = "openrouter/openai/gpt-4.1"
-# Embedding model
-EMBEDDING_MODEL = "text-embedding-3-small"
-EMBEDDING_DIM = 1536
+# Embedding model for JinaAI.
+# See https://jina.ai/embeddings/ for the latest models.
+JINA_EMBEDDING_MODEL = "jina-embeddings-v4"
+# The dimension for jina-embeddings-v4 is 2048, but the API has a limit of 1024.
+# See: https://huggingface.co/jinaai/jina-embeddings-v4
+EMBEDDING_DIM = 1024
 
 WIKI_SEARCH_QUERY = "Artificial Intelligence"
-WIKI_NUM_ARTICLES = 3
+WIKI_NUM_ARTICLES = 1
 DATA_THEME = "AI" # The theme to assign to the indexed documents
 
 def setup_database_and_get_store() -> PGVectorStore:
@@ -142,7 +145,17 @@ def main():
     Main function to orchestrate the Q&A generation pipeline from a vector DB.
     """
     # Set the embedding model for the LlamaIndex settings
-    Settings.embed_model = OpenAIEmbedding(model_name=EMBEDDING_MODEL)
+    # The JinaEmbedding will automatically use the JINA_API_KEY environment variable if it is set.
+    # Passing it explicitly is a more robust way to ensure it's used.
+    api_key = os.getenv("JINA_API_KEY")
+    if not api_key:
+        raise ValueError("JINA_API_KEY environment variable not set. Please get a key from https://jina.ai/embeddings/ and add it to your .env file.")
+    
+    Settings.embed_model = JinaEmbedding(
+        model_name=JINA_EMBEDDING_MODEL,
+        api_key=api_key,
+        dimensions=EMBEDDING_DIM
+    )
 
     logging.info("Setting up vector database")
     vector_store = setup_database_and_get_store()

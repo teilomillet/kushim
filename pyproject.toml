@@ -11,7 +11,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "llama-index",
     "llama-index-vector-stores-postgres",
-    "llama-index-embeddings-openai",
+    "llama-index-embeddings-jinaai",
     "psycopg2-binary",
     "SQLAlchemy",
     "datasets>=3.6.0",
