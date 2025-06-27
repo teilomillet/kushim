@@ -163,10 +163,10 @@ class WikipediaSource:
         try:
             # Preload ensures all content is fetched, reducing subsequent API calls.
             return wikipedia.page(title, auto_suggest=False, preload=True)
-        except wikipedia.exceptions.PageError:
+        except wikipedia.PageError:
             print(f"Warning: Article '{title}' not found. Skipping.")
             return None
-        except wikipedia.exceptions.DisambiguationError as e:
+        except wikipedia.DisambiguationError as e:
             print(f"Warning: '{title}' is a disambiguation page. Options: {e.options}. Skipping.")
             return None
         except Exception as e:
