@@ -1,9 +1,10 @@
 import wikipedia
 import datetime
 import os
+import logging
 from typing import List, Dict, Any, Optional, Protocol, Literal, TypedDict
-from llama_index.core import SimpleDirectoryReader, VectorStoreIndex
-from llama_index.core.vector_stores import MetadataFilter, MetadataFilters
+from llama_index.core import SimpleDirectoryReader, Settings
+from llama_index.core.vector_stores import MetadataFilter, MetadataFilters, VectorStoreQuery
 from llama_index.vector_stores.postgres import PGVectorStore
 
 # Protocol Definition for Extensible Sources
@@ -48,47 +49,55 @@ class VectorDBSource:
         """
         Initializes the VectorDBSource with a vector store instance.
         
-        The connection to the vector database is established here, and the
-        VectorStoreIndex is created to prepare for querying.
+        The connection to the vector database is established here.
         """
         self._vector_store = vector_store
-        self._index = VectorStoreIndex.from_vector_store(vector_store)
 
-    def fetch(self, theme: str, top_k: int = 5) -> List[SourceDocument]:
+    def fetch(self, theme: str, query: Optional[str] = None, top_k: int = 5) -> List[SourceDocument]:
         """
         Fetches documents from the vector database that match a specific theme.
 
-        This method leverages metadata filtering to find documents that have a
-        'theme' metadata field matching the provided value. This allows for
-        the creation of datasets focused on specific topics.
+        This method performs a hybrid search. It uses the 'theme' for metadata
+        filtering and a 'query' for semantic similarity. If no query is provided,
+        the theme itself is used for the semantic search.
 
         Args:
-            theme: The theme to filter the documents by. This assumes that the
-                   documents in the vector store have a 'theme' key in their
-                   metadata.
+            theme: The theme to filter the documents by (metadata).
+            query: The text for semantic search. Defaults to the theme.
             top_k: The maximum number of documents to retrieve.
 
         Returns:
             A list of SourceDocument objects matching the theme.
         """
-        print(f"Fetching top {top_k} documents for theme: '{theme}' from vector database...")
+        search_query = query if query is not None else theme
+        logging.info(f"Fetching top {top_k} documents for theme: '{theme}' with search query: '{search_query}'")
+
+        try:
+            api_base = getattr(Settings.embed_model, 'api_base', 'N/A')
+            logging.debug(f"Embedding model API base: {api_base}")
+        except AttributeError:
+            logging.debug("Could not determine embedding model API base.")
         
         # We create a metadata filter to only retrieve documents with a specific theme.
         filters = MetadataFilters(
             filters=[MetadataFilter(key="theme", value=theme)]
         )
+        logging.debug(f"Using metadata filters: {filters}")
         
-        # The retriever is configured to use the metadata filters.
-        retriever = self._index.as_retriever(
-            similarity_top_k=top_k,
-            filters=filters,
-        )
+        # We query the vector store with a query embedding for semantic search
+        # and with metadata filters.
+        query_embedding = Settings.embed_model.get_query_embedding(search_query)
+        logging.debug(f"Generated query embedding with dimension: {len(query_embedding)}")
 
-        # The query for the retriever can be generic when filtering by theme
-        # as we want to retrieve documents based on the theme metadata, not 
-        # necessarily semantic similarity to a query text. Here we use the 
-        # theme itself as the query string.
-        retrieved_nodes = retriever.retrieve(theme)
+        query_obj = VectorStoreQuery(
+            query_embedding=query_embedding,
+            filters=filters,
+            similarity_top_k=top_k,
+        )
+        query_result = self._vector_store.query(query_obj)
+        
+        retrieved_nodes = query_result.nodes if query_result.nodes else []
+        logging.info(f"Retrieved {len(retrieved_nodes)} documents from vector database.")
 
         documents = []
         for node in retrieved_nodes:

@@ -34,10 +34,12 @@ TABLE_NAME = os.getenv("DB_TABLE_NAME", "kushim_e2e_documents")
 MODEL_TO_USE = "openrouter/openai/gpt-4.1"
 # Embedding model
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EMBEDDING_API_BASE = os.getenv("EMBEDDING_API_BASE")
 EMBEDDING_DIM = 3584
 
-DATA_THEME = "Comment renouveler mon passeport ?" # The theme to assign to the indexed documents
+DATA_THEME = "renouvellement passeport" # A general theme for metadata filtering
+SEARCH_QUERY = "Comment renouveler mon passeport en urgence ?" # A specific query for semantic search
 
 def setup_database_and_get_store() -> PGVectorStore:
     """
@@ -66,7 +68,10 @@ def main():
     """
     Main function to orchestrate the Q&A generation pipeline from a vector DB.
     """
-    Settings.embed_model = OpenAIEmbedding(model_name=EMBEDDING_MODEL, api_base=EMBEDDING_API_BASE, api_key="E")
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY environment variable not set. Please add it to your .env file or export it.")
+
+    Settings.embed_model = OpenAIEmbedding(model_name=EMBEDDING_MODEL, api_base=EMBEDDING_API_BASE, api_key=OPENAI_API_KEY)
     logging.info(f"Embedding api base : {EMBEDDING_API_BASE}")
 
     logging.info("Setting up vector database")
@@ -76,7 +81,7 @@ def main():
     # Now, we use the VectorDBSource to pull the data we just indexed.
     data_source = source.VectorDBSource(vector_store=vector_store)
     
-    fetch_kwargs = {"theme": DATA_THEME}
+    fetch_kwargs = {"theme": DATA_THEME, "query": SEARCH_QUERY}
     output_filename_base = f"{DATA_THEME}_qa"
 
     # Define a file path to save/load the compiled (optimized) generator.
