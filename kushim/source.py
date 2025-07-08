@@ -53,24 +53,33 @@ class VectorDBSource:
         """
         self._vector_store = vector_store
 
-    def fetch(self, theme: str, query: Optional[str] = None, top_k: int = 5) -> List[SourceDocument]:
+    def fetch(
+        self,
+        query: str,
+        theme: Optional[str] = None,
+        top_k: int = 5,
+        vector_store_kwargs: Optional[dict] = None,
+    ) -> List[SourceDocument]:
         """
-        Fetches documents from the vector database that match a specific theme.
+        Fetches documents from the vector database using semantic search and an optional metadata filter.
 
-        This method performs a hybrid search. It uses the 'theme' for metadata
-        filtering and a 'query' for semantic similarity. If no query is provided,
-        the theme itself is used for the semantic search.
+        This method performs a vector search. It uses the 'query' for semantic similarity.
+        If a 'theme' is provided, it adds a metadata filter to the search. Otherwise,
+        it performs a pure vector search across all documents.
 
         Args:
-            theme: The theme to filter the documents by (metadata).
-            query: The text for semantic search. Defaults to the theme.
+            query: The text for semantic search.
+            theme: The theme to filter the documents by (metadata). Defaults to None.
             top_k: The maximum number of documents to retrieve.
+            vector_store_kwargs: Dictionary of extra arguments to be passed to the vector store's query method.
+                                 This is useful for passing tuning parameters like `hnsw_ef_search`.
 
         Returns:
-            A list of SourceDocument objects matching the theme.
+            A list of SourceDocument objects matching the query.
         """
-        search_query = query if query is not None else theme
-        logging.info(f"Fetching top {top_k} documents for theme: '{theme}' with search query: '{search_query}'")
+        logging.info(f"Fetching top {top_k} documents for query: '{query}'")
+        if theme:
+            logging.info(f"Applying metadata filter for theme: '{theme}'")
 
         try:
             api_base = getattr(Settings.embed_model, 'api_base', 'N/A')
@@ -79,14 +88,16 @@ class VectorDBSource:
             logging.debug("Could not determine embedding model API base.")
         
         # We create a metadata filter to only retrieve documents with a specific theme.
-        filters = MetadataFilters(
-            filters=[MetadataFilter(key="theme", value=theme)]
-        )
+        filters = None
+        if theme:
+            filters = MetadataFilters(
+                filters=[MetadataFilter(key="theme", value=theme)]
+            )
         logging.debug(f"Using metadata filters: {filters}")
         
         # We query the vector store with a query embedding for semantic search
         # and with metadata filters.
-        query_embedding = Settings.embed_model.get_query_embedding(search_query)
+        query_embedding = Settings.embed_model.get_query_embedding(query)
         logging.debug(f"Generated query embedding with dimension: {len(query_embedding)}")
 
         query_obj = VectorStoreQuery(
@@ -94,7 +105,12 @@ class VectorDBSource:
             filters=filters,
             similarity_top_k=top_k,
         )
-        query_result = self._vector_store.query(query_obj)
+        
+        # Pass the vector_store_kwargs to the underlying query method.
+        # This allows for advanced, query-time performance tuning, such as adjusting
+        # the HNSW ef_search parameter for a speed/accuracy trade-off.
+        vector_store_kwargs = vector_store_kwargs or {}
+        query_result = self._vector_store.query(query_obj, **vector_store_kwargs)
         
         retrieved_nodes = query_result.nodes if query_result.nodes else []
         logging.info(f"Retrieved {len(retrieved_nodes)} documents from vector database.")
